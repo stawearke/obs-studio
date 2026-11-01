@@ -46,11 +46,18 @@ struct MKTool {
 };
 
 const MKTool MK_TOOLS[] = {
-	{"switcher", "MK Switcher", "/", 1280, 760},   {"cam", "MK Cameras", "/cam", 1100, 700},
-	{"graphics", "MK Graphics", "/graphics", 1280, 760}, {"playout", "MK Playout", "/playout", 1100, 700},
-	{"prompter", "MK Prompter", "/prompter", 900, 700}, {"rundown", "MK Rundown", "/rundown", 1100, 700},
-	{"sounds", "MK Sounds", "/sounds", 900, 600},  {"audio", "MK VOXONE Audio", "/audio", 1280, 760},
-	{"onair", "MK OnAir Studio", "/onair", 1280, 760}, {"settings", "MK Settings", "/settings", 900, 700},
+	{"switcher", "MK Switcher", "/", 1280, 760},
+	{"studio", "MK Scenes & Sources", "/studio", 1100, 700},
+	{"stream", "MK Stream & Record", "/streaming", 1100, 700},
+	{"cam", "MK Cameras", "/cam", 1100, 700},
+	{"graphics", "MK Graphics", "/graphics", 1280, 760},
+	{"playout", "MK Playout", "/playout", 1100, 700},
+	{"prompter", "MK Prompter", "/prompter", 900, 700},
+	{"rundown", "MK Rundown", "/rundown", 1100, 700},
+	{"sounds", "MK Sounds", "/sounds", 900, 600},
+	{"audio", "MK VOXONE Audio", "/audio", 1280, 760},
+	{"onair", "MK OnAir Studio", "/onair", 1280, 760},
+	{"settings", "MK Settings", "/settings", 900, 700},
 };
 
 } // namespace
@@ -90,6 +97,8 @@ void OBSBasic::InitMKStudio()
 	connect(deskAction, &QAction::triggered, this, [this]() { ApplyMKLayout(true); });
 	QAction *classicAction = menu->addAction(QString::fromUtf8("Classic OBS Layout"));
 	connect(classicAction, &QAction::triggered, this, [this]() { ApplyMKLayout(false); });
+	QAction *obsSettings = menu->addAction(QString::fromUtf8("OBS Settings (advanced)..."));
+	connect(obsSettings, &QAction::triggered, this, [this]() { on_action_Settings_triggered(); });
 	menu->addSeparator();
 
 	setTabPosition(Qt::RightDockWidgetArea, QTabWidget::North);
@@ -120,7 +129,7 @@ void OBSBasic::InitMKStudio()
 		dock->hide();
 
 		/* Menu entry = "go to this page": show it and bring its tab to the front. */
-		QAction *open = menu->addAction(title);
+		QAction *open = menu->addAction(QString(title).replace("&", "&&"));
 		connect(open, &QAction::triggered, dock, [this, dock]() {
 			if (!property("mkMode").toBool())
 				dock->setFloating(true);
