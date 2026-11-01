@@ -15,6 +15,7 @@
 
 #pragma once
 
+#include <QByteArray>
 #include <QObject>
 #include <QString>
 #include <QTcpServer>
@@ -32,6 +33,7 @@ class MKWebServer : public QObject {
 	QString root;
 	QString rootCanonical;
 	quint16 listenPort = 0;
+	QByteArray configJson;
 
 	void respond(QTcpSocket *sock, const QByteArray &request);
 	void sendSimple(QTcpSocket *sock, int code, const char *text);
@@ -44,4 +46,7 @@ public:
 
 	bool start(quint16 port);
 	quint16 port() const { return listenPort; }
+
+	/* Served at /mk-config.json to same-origin pages only: how the MK pages reach the built-in engine. */
+	void setConfigJson(const QByteArray &json) { configJson = json; }
 };

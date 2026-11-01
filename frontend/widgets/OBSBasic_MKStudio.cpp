@@ -24,6 +24,8 @@
 
 #include <QFileInfo>
 #include <QAction>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QMenu>
 #include <QTimer>
 
@@ -64,6 +66,13 @@ const MKTool MK_TOOLS[] = {
 
 void OBSBasic::InitMKStudio()
 {
+	/* Not an OBS shell: no links to obsproject.com, Discord, updater or release notes. */
+	for (QAction *a : {ui->actionHelpPortal, ui->actionWebsite, ui->actionDiscord, ui->actionCheckForUpdates,
+			   ui->actionRepair, ui->actionShowWhatsNew, ui->actionReleaseNotes}) {
+		if (a)
+			a->setVisible(false);
+	}
+
 	if (!cef)
 		return;
 
@@ -102,6 +111,36 @@ void OBSBasic::InitMKStudio()
 	menu->addSeparator();
 
 	setTabPosition(Qt::RightDockWidgetArea, QTabWidget::North);
+
+	/* Zero setup: tell the MK pages how to reach the built-in engine (obs-websocket on this PC). */
+	{
+		config_t *user = App()->GetUserConfig();
+		config_t *app = App()->GetAppConfig();
+		const char *sec = "OBSWebSocket";
+		config_t *cfg = config_has_user_value(user, sec, "ServerPort") ? user : app;
+
+		const bool enabled = config_get_bool(cfg, sec, "ServerEnabled");
+		int wsPort = (int)config_get_uint(cfg, sec, "ServerPort");
+		if (wsPort <= 0 || wsPort > 65535)
+			wsPort = 4455;
+		const char *pw = config_get_string(cfg, sec, "ServerPassword");
+		const bool auth = config_get_bool(cfg, sec, "AuthRequired");
+
+		QJsonObject o;
+		o["mk"] = 1;
+		o["host"] = "127.0.0.1";
+		o["port"] = wsPort;
+		o["password"] = (auth && pw) ? QString::fromUtf8(pw) : QString();
+		o["engineEnabled"] = enabled;
+		mkWebServer->setConfigJson(QJsonDocument(o).toJson(QJsonDocument::Compact));
+
+		if (!enabled) {
+			/* obs-websocket starts before this runs, so it comes on at the next launch. */
+			config_set_bool(cfg, sec, "ServerEnabled", true);
+			config_save_safe(cfg, "tmp", nullptr);
+			blog(LOG_WARNING, "[MK VISION Studio] Built-in engine connection was off; enabled for next start");
+		}
+	}
 
 	const QString base = QString("http://127.0.0.1:%1").arg(mkWebServer->port());
 

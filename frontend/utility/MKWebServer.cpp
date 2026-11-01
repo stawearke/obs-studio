@@ -175,6 +175,37 @@ void MKWebServer::respond(QTcpSocket *sock, const QByteArray &request)
 		return;
 	}
 
+	if (path == "/mk-config.json") {
+		if (configJson.isEmpty()) {
+			sendSimple(sock, 404, "Not Found");
+			return;
+		}
+		/* Same-origin only: a page from another site sends Origin / Sec-Fetch-Site headers. */
+		QByteArray origin, fetchSite;
+		for (const QByteArray &line : request.left(request.indexOf("\r\n\r\n")).split('\n')) {
+			const QByteArray l = line.trimmed().toLower();
+			if (l.startsWith("origin:"))
+				origin = l.mid(7).trimmed();
+			else if (l.startsWith("sec-fetch-site:"))
+				fetchSite = l.mid(15).trimmed();
+		}
+		const bool originOk = origin.isEmpty() || origin == "http://127.0.0.1:" + p ||
+				      origin == "http://localhost:" + p;
+		const bool siteOk = fetchSite.isEmpty() || fetchSite == "same-origin" || fetchSite == "none";
+		if (!originOk || !siteOk) {
+			sendSimple(sock, 403, "Forbidden");
+			return;
+		}
+		QByteArray head = "HTTP/1.1 200 OK\r\nContent-Type: application/json; charset=utf-8\r\n";
+		head += "Content-Length: " + QByteArray::number(configJson.size()) + "\r\n";
+		head += "Cache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nConnection: close\r\n\r\n";
+		sock->write(head);
+		if (!isHead)
+			sock->write(configJson);
+		sock->disconnectFromHost();
+		return;
+	}
+
 	const QString rel = path.mid(1);
 	QString filePath = rootCanonical + "/" + rel;
 	QFileInfo info(filePath);

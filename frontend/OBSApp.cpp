@@ -1405,7 +1405,8 @@ bool OBSApp::IsPortableMode()
 
 bool OBSApp::IsUpdaterDisabled()
 {
-	return opt_disable_updater;
+	/* MK VISION Studio is not updated from obsproject.com (that would replace it with stock OBS). */
+	return true;
 }
 
 bool OBSApp::IsMissingFilesCheckDisabled()
