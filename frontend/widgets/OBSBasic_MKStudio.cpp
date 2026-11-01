@@ -18,6 +18,7 @@
 #ifdef BROWSER_AVAILABLE
 #include <docks/BrowserDock.hpp>
 #include <utility/MKWebServer.hpp>
+#include <utility/platform.hpp>
 
 #include <qt-wrappers.hpp>
 
@@ -57,14 +58,15 @@ void OBSBasic::InitMKStudio()
 	if (!cef)
 		return;
 
-	BPtr<char> shell = obs_find_data_file("mk-studio/web/_shell.html");
-	if (!shell) {
+	/* obs_find_data_file() only searches data/libobs; our bundle lives in data/obs-studio. */
+	std::string shellPath;
+	if (!GetDataFilePath("mk-studio/web/_shell.html", shellPath)) {
 		blog(LOG_WARNING, "[MK VISION Studio] Bundled web build not found (data/obs-studio/mk-studio/web); "
 				  "MK docks disabled");
 		return;
 	}
 
-	const QString root = QFileInfo(QString::fromUtf8(shell.Get())).absolutePath();
+	const QString root = QFileInfo(QString::fromUtf8(shellPath.c_str())).absolutePath();
 	mkWebServer = new MKWebServer(root, this);
 	if (!mkWebServer->start(MK_STUDIO_PORT)) {
 		blog(LOG_ERROR, "[MK VISION Studio] Could not listen on 127.0.0.1:%d (port in use?); MK docks disabled",
