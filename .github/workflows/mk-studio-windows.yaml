@@ -28,6 +28,8 @@ jobs:
         shell: pwsh
     env:
       MK_VERSION: ${{ inputs.version || '1.0.0' }}
+      MK_REPO: stawearke/audio-console-magic
+      MK_REF: mk-studio
     steps:
       - uses: actions/checkout@v4
         with:
@@ -52,6 +54,32 @@ jobs:
           $exe = "build_x64/install/bin/64bit/obs64.exe"
           if (-not (Test-Path $exe)) { Get-ChildItem build_x64/install -Recurse -Depth 3 | Select-Object -First 80 FullName; throw "$exe not found" }
           Get-ChildItem build_x64/install -Directory | Select-Object Name
+          if (-not (Test-Path build_x64/install/data/obs-studio)) { throw 'build_x64/install/data/obs-studio missing' }
+
+      # MK VISION web build, bundled into the app so the docks work offline (sign-in still needs internet)
+      - name: Checkout MK web app
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.MK_REPO }}
+          ref: ${{ env.MK_REF }}
+          path: mk-src
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Build MK web app and bundle it
+        working-directory: mk-src
+        run: |
+          npm ci --no-audit --no-fund
+          $env:ELECTRON_BUILD = '1'
+          npm run build
+          if (-not (Test-Path .output/public/_shell.html)) { throw "MK build did not produce .output/public/_shell.html" }
+          $dest = "$env:GITHUB_WORKSPACE/build_x64/install/data/obs-studio/mk-studio/web"
+          New-Item -ItemType Directory -Force $dest | Out-Null
+          Copy-Item -Recurse -Force .output/public/* $dest
+          Get-ChildItem $dest | Select-Object Name
 
       - name: Install Inno Setup if missing
         run: |

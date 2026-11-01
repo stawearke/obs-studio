@@ -48,6 +48,7 @@
 extern volatile bool recording_paused;
 
 class ColorSelect;
+class MKWebServer;
 class OBSAbout;
 class OBSBasicAdvAudio;
 class OBSBasicFilters;
@@ -367,6 +368,14 @@ private:
 	void SaveExtraBrowserDocks();
 	void ManageExtraBrowserDocks();
 	void AddExtraBrowserDock(const QString &title, const QString &url, const QString &uuid, bool firstCreate);
+
+	/* MK VISION Studio built-in panels */
+	QList<std::shared_ptr<QDockWidget>> mkStudioDocks;
+	MKWebServer *mkWebServer = nullptr;
+
+	void InitMKStudio();
+	void ClearMKStudio();
+	void AddMKDockWidget(QDockWidget *dock, Qt::DockWidgetArea area);
 #endif
 
 public:

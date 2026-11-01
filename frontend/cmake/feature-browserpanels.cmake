@@ -10,6 +10,9 @@ if(TARGET OBS::browser-panels)
       dialogs/OBSExtraBrowsers.hpp
       docks/BrowserDock.cpp
       docks/BrowserDock.hpp
+      utility/MKWebServer.cpp
+      utility/MKWebServer.hpp
+      widgets/OBSBasic_MKStudio.cpp
       utility/ExtraBrowsersDelegate.cpp
       utility/ExtraBrowsersDelegate.hpp
       utility/ExtraBrowsersModel.cpp

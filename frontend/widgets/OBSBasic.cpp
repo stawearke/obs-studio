@@ -1105,6 +1105,7 @@ void OBSBasic::OBSInit()
 		ui->menuDocks->insertSeparator(ui->scenesDock->toggleViewAction());
 
 		LoadExtraBrowserDocks();
+		InitMKStudio();
 	}
 #endif
 
@@ -1876,6 +1877,7 @@ void OBSBasic::closeWindow()
 	auth.reset();
 
 #ifdef BROWSER_AVAILABLE
+	ClearMKStudio();
 	ClearExtraBrowserDocks();
 
 #ifdef YOUTUBE_ENABLED

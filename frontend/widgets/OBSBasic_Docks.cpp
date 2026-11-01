@@ -180,6 +180,27 @@ void OBSBasic::AddDockWidget(QDockWidget *dock, Qt::DockWidgetArea area, bool ex
 	extraDocks.push_back(std::shared_ptr<QDockWidget>(dock));
 }
 
+#ifdef BROWSER_AVAILABLE
+/* MK VISION Studio docks: registered like other docks but kept out of the
+ * "Docks" menu and out of the user's custom browser dock list. */
+void OBSBasic::AddMKDockWidget(QDockWidget *dock, Qt::DockWidgetArea area)
+{
+	if (dock->objectName().isEmpty()) {
+		return;
+	}
+
+	bool lock = ui->lockDocks->isChecked();
+	QDockWidget::DockWidgetFeatures features =
+		lock ? QDockWidget::NoDockWidgetFeatures
+		     : (QDockWidget::DockWidgetClosable | QDockWidget::DockWidgetMovable |
+			QDockWidget::DockWidgetFloatable);
+
+	setupDockAction(dock);
+	dock->setFeatures(features);
+	addDockWidget(area, dock);
+}
+#endif
+
 void OBSBasic::RemoveDockWidget(const QString &name)
 {
 	if (extraDockNames.contains(name)) {
