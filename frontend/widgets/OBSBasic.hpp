@@ -375,6 +375,7 @@ private:
 
 	void InitMKStudio();
 	void ClearMKStudio();
+	void ApplyMKLayout(bool mkMode);
 	void AddMKDockWidget(QDockWidget *dock, Qt::DockWidgetArea area);
 #endif
 

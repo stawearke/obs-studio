@@ -23,7 +23,9 @@
 #include <qt-wrappers.hpp>
 
 #include <QFileInfo>
+#include <QAction>
 #include <QMenu>
+#include <QTimer>
 
 #include <memory>
 
@@ -84,6 +86,14 @@ void OBSBasic::InitMKStudio()
 	ui->viewMenu->addSeparator();
 	QMenu *menu = ui->viewMenu->addMenu(QString::fromUtf8("MK VISION"));
 
+	QAction *deskAction = menu->addAction(QString::fromUtf8("MK VISION Desk (full layout)"));
+	connect(deskAction, &QAction::triggered, this, [this]() { ApplyMKLayout(true); });
+	QAction *classicAction = menu->addAction(QString::fromUtf8("Classic OBS Layout"));
+	connect(classicAction, &QAction::triggered, this, [this]() { ApplyMKLayout(false); });
+	menu->addSeparator();
+
+	setTabPosition(Qt::RightDockWidgetArea, QTabWidget::North);
+
 	const QString base = QString("http://127.0.0.1:%1").arg(mkWebServer->port());
 
 	for (const MKTool &tool : MK_TOOLS) {
@@ -104,9 +114,19 @@ void OBSBasic::InitMKStudio()
 		dock->SetWidget(browser);
 
 		AddMKDockWidget(dock, Qt::RightDockWidgetArea);
-		dock->setFloating(true);
+		/* All MK pages share one tab group; the first one (Switcher) is the anchor. */
+		if (!mkStudioDocks.isEmpty())
+			tabifyDockWidget(mkStudioDocks.first().get(), dock);
 		dock->hide();
-		menu->addAction(dock->toggleViewAction());
+
+		/* Menu entry = "go to this page": show it and bring its tab to the front. */
+		QAction *open = menu->addAction(title);
+		connect(open, &QAction::triggered, dock, [this, dock]() {
+			if (!property("mkMode").toBool())
+				dock->setFloating(true);
+			dock->show();
+			dock->raise();
+		});
 
 		auto loaded = std::make_shared<bool>(false);
 		connect(dock, &QDockWidget::visibilityChanged, dock, [browser, url, loaded](bool visible) {
@@ -117,6 +137,51 @@ void OBSBasic::InitMKStudio()
 		});
 
 		mkStudioDocks.push_back(std::shared_ptr<QDockWidget>(dock));
+	}
+
+	/* Default: MK VISION is the UI. Runs after OBS restores its saved dock state. */
+	const bool classic = config_get_bool(App()->GetUserConfig(), "MKStudio", "ClassicLayout");
+	if (!classic)
+		QTimer::singleShot(400, this, [this]() { ApplyMKLayout(true); });
+}
+
+void OBSBasic::ApplyMKLayout(bool mkMode)
+{
+	if (mkStudioDocks.isEmpty())
+		return;
+
+	setProperty("mkMode", mkMode);
+	config_set_bool(App()->GetUserConfig(), "MKStudio", "ClassicLayout", !mkMode);
+	config_save_safe(App()->GetUserConfig(), "tmp", nullptr);
+
+	QList<QDockWidget *> natives{ui->scenesDock, ui->sourcesDock, ui->mixerDock, ui->transitionsDock};
+	if (controlsDock)
+		natives.push_back(controlsDock);
+
+	if (mkMode) {
+		for (QDockWidget *d : natives)
+			d->hide();
+		if (statsDock)
+			statsDock->hide();
+		centralWidget()->hide();
+
+		/* Re-dock every MK page into one tab group on the right, Switcher in front. */
+		QDockWidget *first = mkStudioDocks.first().get();
+		for (auto &d : mkStudioDocks) {
+			removeDockWidget(d.get());
+			addDockWidget(Qt::RightDockWidgetArea, d.get());
+			d->setFloating(false);
+			if (d.get() != first)
+				tabifyDockWidget(first, d.get());
+			d->show();
+		}
+		first->raise();
+	} else {
+		for (auto &d : mkStudioDocks)
+			d->hide();
+		centralWidget()->show();
+		for (QDockWidget *d : natives)
+			d->show();
 	}
 }
 
