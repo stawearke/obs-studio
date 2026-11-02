@@ -61,7 +61,6 @@ const MKTool MK_TOOLS[] = {
 	{"rundown", "MK Rundown", "/rundown", 1100, 700},
 	{"sounds", "MK Sounds", "/sounds", 900, 600},
 	{"audio", "MK VOXONE Audio", "/audio", 1280, 760},
-	{"onair", "MK OnAir Studio", "/onair", 1280, 760},
 	{"settings", "MK Settings", "/settings", 900, 700},
 };
 
