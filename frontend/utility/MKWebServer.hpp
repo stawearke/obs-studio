@@ -34,6 +34,7 @@ class MKWebServer : public QObject {
 	QString rootCanonical;
 	quint16 listenPort = 0;
 	QByteArray configJson;
+	bool allowLan = false;
 
 	void respond(QTcpSocket *sock, const QByteArray &request);
 	void sendSimple(QTcpSocket *sock, int code, const char *text);
@@ -49,4 +50,7 @@ public:
 
 	/* Served at /mk-config.json to same-origin pages only: how the MK pages reach the built-in engine. */
 	void setConfigJson(const QByteArray &json) { configJson = json; }
+
+	/* Opt-in: let crew on the same network open the desk by this PC's IP address. */
+	void setAllowLan(bool allow) { allowLan = allow; }
 };

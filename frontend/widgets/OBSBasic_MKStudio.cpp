@@ -24,9 +24,12 @@
 
 #include <QFileInfo>
 #include <QAction>
+#include <QHostAddress>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QMenu>
+#include <QNetworkInterface>
 #include <QTimer>
 
 #include <memory>
@@ -86,6 +89,8 @@ void OBSBasic::InitMKStudio()
 
 	const QString root = QFileInfo(QString::fromUtf8(shellPath.c_str())).absolutePath();
 	mkWebServer = new MKWebServer(root, this);
+	const bool allowCrew = config_get_bool(App()->GetUserConfig(), "MKStudio", "AllowCrew");
+	mkWebServer->setAllowLan(allowCrew);
 	if (!mkWebServer->start(MK_STUDIO_PORT)) {
 		blog(LOG_ERROR, "[MK VISION Studio] Could not listen on 127.0.0.1:%d (port in use?); MK docks disabled",
 		     (int)MK_STUDIO_PORT);
@@ -108,6 +113,13 @@ void OBSBasic::InitMKStudio()
 	connect(classicAction, &QAction::triggered, this, [this]() { ApplyMKLayout(false); });
 	QAction *obsSettings = menu->addAction(QString::fromUtf8("OBS Settings (advanced)..."));
 	connect(obsSettings, &QAction::triggered, this, [this]() { on_action_Settings_triggered(); });
+	QAction *crewAction = menu->addAction(QString::fromUtf8("Allow crew on this network (restart to apply)"));
+	crewAction->setCheckable(true);
+	crewAction->setChecked(allowCrew);
+	connect(crewAction, &QAction::toggled, this, [](bool on) {
+		config_set_bool(App()->GetUserConfig(), "MKStudio", "AllowCrew", on);
+		config_save_safe(App()->GetUserConfig(), "tmp", nullptr);
+	});
 	menu->addSeparator();
 
 	setTabPosition(Qt::RightDockWidgetArea, QTabWidget::North);
@@ -132,6 +144,17 @@ void OBSBasic::InitMKStudio()
 		o["port"] = wsPort;
 		o["password"] = (auth && pw) ? QString::fromUtf8(pw) : QString();
 		o["engineEnabled"] = enabled;
+		o["crew"] = allowCrew;
+		o["crewPort"] = (int)mkWebServer->port();
+		QJsonArray lan;
+		if (allowCrew) {
+			for (const QHostAddress &a : QNetworkInterface::allAddresses()) {
+				const QString ip = a.toString();
+				if (a.protocol() == QAbstractSocket::IPv4Protocol && !a.isLoopback() && !ip.startsWith("169.254."))
+					lan.append(ip);
+			}
+		}
+		o["lan"] = lan;
 		mkWebServer->setConfigJson(QJsonDocument(o).toJson(QJsonDocument::Compact));
 
 		if (!enabled) {

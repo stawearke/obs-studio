@@ -92,7 +92,7 @@ bool MKWebServer::start(quint16 port)
 {
 	if (rootCanonical.isEmpty())
 		return false;
-	if (!server.listen(QHostAddress::LocalHost, port))
+	if (!server.listen(allowLan ? QHostAddress(QHostAddress::AnyIPv4) : QHostAddress(QHostAddress::LocalHost), port))
 		return false;
 	listenPort = server.serverPort();
 	return true;
@@ -156,7 +156,17 @@ void MKWebServer::respond(QTcpSocket *sock, const QByteArray &request)
 		}
 	}
 	const QByteArray p = QByteArray::number(listenPort);
-	if (host != "127.0.0.1:" + p && host != "localhost:" + p) {
+	bool hostOk = (host == "127.0.0.1:" + p || host == "localhost:" + p);
+	if (!hostOk && allowLan) {
+		/* Crew on this network arrive by IP address. Names are refused (DNS rebinding). */
+		const int colon = host.lastIndexOf(':');
+		if (colon > 0 && host.mid(colon + 1) == p) {
+			QHostAddress addr;
+			hostOk = addr.setAddress(QString::fromLatin1(host.left(colon))) &&
+				 addr.protocol() == QAbstractSocket::IPv4Protocol;
+		}
+	}
+	if (!hostOk) {
 		sendSimple(sock, 403, "Forbidden");
 		return;
 	}
@@ -176,6 +186,11 @@ void MKWebServer::respond(QTcpSocket *sock, const QByteArray &request)
 	}
 
 	if (path == "/mk-config.json") {
+		/* The engine password is only ever given to this PC, never to crew on the network. */
+		if (!sock->peerAddress().isLoopback()) {
+			sendSimple(sock, 404, "Not Found");
+			return;
+		}
 		if (configJson.isEmpty()) {
 			sendSimple(sock, 404, "Not Found");
 			return;
