@@ -95,6 +95,22 @@ QJsonArray ListAudioDevices(const char *sourceId)
 	return arr;
 }
 
+bool CollectMonitorDevice(void *data, const char *name, const char *id)
+{
+	QJsonObject d;
+	d["name"] = QString::fromUtf8(name ? name : "");
+	d["id"] = QString::fromUtf8(id ? id : "");
+	static_cast<QJsonArray *>(data)->append(d);
+	return true;
+}
+
+QJsonArray ListMonitorDevices()
+{
+	QJsonArray arr;
+	obs_enum_audio_monitoring_devices(CollectMonitorDevice, &arr);
+	return arr;
+}
+
 bool HasDevice(const QJsonArray &list, const QString &id)
 {
 	for (const QJsonValue &v : list)
@@ -129,6 +145,42 @@ QByteArray OBSBasic::HandleMKApi(const QString &route, const QByteArray &body, i
 			channels.append(c);
 		}
 		out["channels"] = channels;
+
+	} else if (route == "monitor-devices") {
+		/* Where Main / Solo pre-listen is heard (OBS Settings > Audio > Monitoring Device). */
+		out["devices"] = ListMonitorDevices();
+		const char *curName = nullptr;
+		const char *curId = nullptr;
+		obs_get_audio_monitoring_device(&curName, &curId);
+		out["currentId"] = QString::fromUtf8(curId ? curId : "default");
+		out["currentName"] = QString::fromUtf8(curName ? curName : "");
+
+	} else if (route == "monitor-device") {
+		const QJsonObject in = QJsonDocument::fromJson(body).object();
+		const QString id = in["deviceId"].toString();
+		const QJsonArray known = ListMonitorDevices();
+		QString name;
+		for (const QJsonValue &v : known)
+			if (v.toObject()["id"].toString() == id)
+				name = v.toObject()["name"].toString();
+
+		if (id.isEmpty() || name.isEmpty()) {
+			status = 400;
+			out["error"] = "unknown device";
+		} else {
+			const QByteArray idUtf8 = id.toUtf8();
+			const QByteArray nameUtf8 = name.toUtf8();
+			if (obs_set_audio_monitoring_device(nameUtf8.constData(), idUtf8.constData())) {
+				config_set_string(activeConfiguration, "Audio", "MonitoringDeviceName", nameUtf8.constData());
+				config_set_string(activeConfiguration, "Audio", "MonitoringDeviceId", idUtf8.constData());
+				config_save_safe(activeConfiguration, "tmp", nullptr);
+				blog(LOG_INFO, "[MK VISION Studio] Monitoring device set to '%s'", nameUtf8.constData());
+				out["ok"] = true;
+			} else {
+				status = 400;
+				out["error"] = "the engine could not use that device";
+			}
+		}
 
 	} else if (route == "audio-device") {
 		const QJsonObject in = QJsonDocument::fromJson(body).object();
