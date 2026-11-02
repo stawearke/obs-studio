@@ -21,6 +21,7 @@
 #include <QHostAddress>
 #include <QTcpSocket>
 #include <QUrl>
+#include <QUuid>
 
 #include <memory>
 
@@ -32,6 +33,16 @@ struct ConnState {
 	QByteArray data;
 	bool done = false;
 };
+
+QByteArray HeaderValue(const QByteArray &headers, const QByteArray &name)
+{
+	for (const QByteArray &line : headers.split('\n')) {
+		const QByteArray l = line.trimmed();
+		if (l.toLower().startsWith(name.toLower() + ":"))
+			return l.mid(name.size() + 1).trimmed();
+	}
+	return QByteArray();
+}
 
 const char *MimeFor(const QString &suffix)
 {
@@ -85,6 +96,7 @@ MKWebServer::MKWebServer(const QString &rootDir, QObject *parent)
 	  root(rootDir)
 {
 	rootCanonical = QFileInfo(root).canonicalFilePath();
+	tokenValue = QUuid::createUuid().toString(QUuid::WithoutBraces).toUtf8();
 	connect(&server, &QTcpServer::newConnection, this, &MKWebServer::onNewConnection);
 }
 
@@ -107,12 +119,23 @@ void MKWebServer::onNewConnection()
 			if (state->done)
 				return;
 			state->data.append(sock->readAll());
-			if (state->data.size() > 16384) {
+			if (state->data.size() > 65536) {
 				state->done = true;
 				sock->abort();
 				return;
 			}
-			if (!state->data.contains("\r\n\r\n"))
+			const int headEnd = state->data.indexOf("\r\n\r\n");
+			if (headEnd < 0)
+				return;
+			bool ok = true;
+			const QByteArray lenText = HeaderValue(state->data.left(headEnd), "Content-Length");
+			const int need = lenText.isEmpty() ? 0 : lenText.toInt(&ok);
+			if (!ok || need < 0) {
+				state->done = true;
+				sendSimple(sock, 400, "Bad Request");
+				return;
+			}
+			if (state->data.size() < headEnd + 4 + need)
 				return;
 			state->done = true;
 			respond(sock, state->data);
@@ -131,6 +154,39 @@ void MKWebServer::sendSimple(QTcpSocket *sock, int code, const char *text)
 	sock->disconnectFromHost();
 }
 
+void MKWebServer::handleApi(QTcpSocket *sock, const QByteArray &method, const QString &route, const QByteArray &headers,
+			    const QByteArray &body)
+{
+	/* This PC only; never reachable by crew on the network. */
+	if (!sock->peerAddress().isLoopback() || !apiHandler) {
+		sendSimple(sock, 404, "Not Found");
+		return;
+	}
+
+	const QByteArray p = QByteArray::number(listenPort);
+	const QByteArray origin = HeaderValue(headers, "Origin").toLower();
+	const QByteArray fetchSite = HeaderValue(headers, "Sec-Fetch-Site").toLower();
+	const bool originOk = (origin == "http://127.0.0.1:" + p || origin == "http://localhost:" + p) ||
+			      (origin.isEmpty() && method != "POST");
+	const bool siteOk = fetchSite.isEmpty() || fetchSite == "same-origin";
+	if (!originOk || !siteOk || HeaderValue(headers, "X-MK-Token") != tokenValue) {
+		sendSimple(sock, 403, "Forbidden");
+		return;
+	}
+
+	int status = 200;
+	const QByteArray out = apiHandler(route, body, status);
+	const char *text = status == 200 ? "OK" : status == 400 ? "Bad Request" : status == 404 ? "Not Found" : "Error";
+
+	QByteArray head = "HTTP/1.1 " + QByteArray::number(status) + " " + text + "\r\n";
+	head += "Content-Type: application/json; charset=utf-8\r\n";
+	head += "Content-Length: " + QByteArray::number(out.size()) + "\r\n";
+	head += "Cache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nConnection: close\r\n\r\n";
+	sock->write(head);
+	sock->write(out);
+	sock->disconnectFromHost();
+}
+
 void MKWebServer::respond(QTcpSocket *sock, const QByteArray &request)
 {
 	const int lineEnd = request.indexOf("\r\n");
@@ -142,7 +198,8 @@ void MKWebServer::respond(QTcpSocket *sock, const QByteArray &request)
 
 	const QByteArray method = parts[0];
 	const bool isHead = (method == "HEAD");
-	if (method != "GET" && !isHead) {
+	const bool isPost = (method == "POST");
+	if (method != "GET" && !isHead && !isPost) {
 		sendSimple(sock, 405, "Method Not Allowed");
 		return;
 	}
@@ -182,6 +239,16 @@ void MKWebServer::respond(QTcpSocket *sock, const QByteArray &request)
 	const QString path = QUrl::fromPercentEncoding(rawPath);
 	if (path.contains("..") || path.contains('\\') || path.contains(QChar(0)) || !path.startsWith('/')) {
 		sendSimple(sock, 400, "Bad Request");
+		return;
+	}
+
+	if (path.startsWith("/mk-api/")) {
+		const int headEnd = request.indexOf("\r\n\r\n");
+		handleApi(sock, method, path.mid(8), request.left(headEnd), request.mid(headEnd + 4));
+		return;
+	}
+	if (isPost) {
+		sendSimple(sock, 405, "Method Not Allowed");
 		return;
 	}
 

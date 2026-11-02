@@ -66,6 +66,99 @@ const MKTool MK_TOOLS[] = {
 
 } // namespace
 
+namespace {
+
+/* Devices OBS can capture for this source kind (same list OBS Settings > Audio shows). */
+QJsonArray ListAudioDevices(const char *sourceId)
+{
+	QJsonArray arr;
+	obs_properties_t *props = obs_get_source_properties(sourceId);
+	if (!props)
+		return arr;
+	obs_property_t *prop = obs_properties_get(props, "device_id");
+	if (prop) {
+		const size_t count = obs_property_list_item_count(prop);
+		for (size_t i = 0; i < count; i++) {
+			if (obs_property_list_item_disabled(prop, i))
+				continue;
+			const char *name = obs_property_list_item_name(prop, i);
+			const char *value = obs_property_list_item_string(prop, i);
+			if (!name || !value)
+				continue;
+			QJsonObject d;
+			d["name"] = QString::fromUtf8(name);
+			d["id"] = QString::fromUtf8(value);
+			arr.append(d);
+		}
+	}
+	obs_properties_destroy(props);
+	return arr;
+}
+
+bool HasDevice(const QJsonArray &list, const QString &id)
+{
+	for (const QJsonValue &v : list)
+		if (v.toObject()["id"].toString() == id)
+			return true;
+	return false;
+}
+
+} // namespace
+
+/* Native bridge for the MK pages. Audio first: OBS "global" audio channels 1-2 (desktop) and 3-6 (mic/aux).
+ * These are always live, unlike inputs inside a scene, and are what OBS Settings > Audio edits. */
+QByteArray OBSBasic::HandleMKApi(const QString &route, const QByteArray &body, int &status)
+{
+	status = 200;
+	QJsonObject out;
+
+	if (route == "audio-devices") {
+		out["inputs"] = ListAudioDevices(App()->InputAudioSource());
+		out["outputs"] = ListAudioDevices(App()->OutputAudioSource());
+		QJsonArray channels;
+		for (int ch = 1; ch <= 6; ch++) {
+			QJsonObject c;
+			c["channel"] = ch;
+			c["kind"] = ch <= 2 ? "output" : "input";
+			OBSSourceAutoRelease src = obs_get_output_source(ch);
+			if (src) {
+				OBSDataAutoRelease settings = obs_source_get_settings(src);
+				c["name"] = QString::fromUtf8(obs_source_get_name(src));
+				c["deviceId"] = QString::fromUtf8(obs_data_get_string(settings, "device_id"));
+			}
+			channels.append(c);
+		}
+		out["channels"] = channels;
+
+	} else if (route == "audio-device") {
+		const QJsonObject in = QJsonDocument::fromJson(body).object();
+		const int ch = in["channel"].toInt();
+		const QString id = in["deviceId"].toString();
+		const QString label = in["label"].toString();
+		const bool isOutput = ch <= 2;
+
+		const QJsonArray known = ListAudioDevices(isOutput ? App()->OutputAudioSource() : App()->InputAudioSource());
+		if (ch < 1 || ch > 6 || id.isEmpty() || (id != "disabled" && !HasDevice(known, id))) {
+			status = 400;
+			out["error"] = "unknown channel or device";
+		} else {
+			const QByteArray idUtf8 = id.toUtf8();
+			const QByteArray labelUtf8 = (label.isEmpty() ? QString("USB audio") : label).toUtf8();
+			ResetAudioDevice(isOutput ? App()->OutputAudioSource() : App()->InputAudioSource(), idUtf8.constData(),
+					 labelUtf8.constData(), ch);
+			SaveProject();
+			blog(LOG_INFO, "[MK VISION Studio] Audio channel %d set to device '%s'", ch, idUtf8.constData());
+			out["ok"] = true;
+		}
+
+	} else {
+		status = 404;
+		out["error"] = "unknown route";
+	}
+
+	return QJsonDocument(out).toJson(QJsonDocument::Compact);
+}
+
 void OBSBasic::InitMKStudio()
 {
 	/* Not an OBS shell: no links to obsproject.com, Discord, updater or release notes. */
@@ -97,6 +190,8 @@ void OBSBasic::InitMKStudio()
 		mkWebServer = nullptr;
 		return;
 	}
+	mkWebServer->setApiHandler(
+		[this](const QString &route, const QByteArray &body, int &status) { return HandleMKApi(route, body, status); });
 	blog(LOG_INFO, "[MK VISION Studio] Serving %s on http://127.0.0.1:%d", QT_TO_UTF8(root), (int)MK_STUDIO_PORT);
 
 	static int panel_version = -1;
@@ -143,6 +238,7 @@ void OBSBasic::InitMKStudio()
 		o["port"] = wsPort;
 		o["password"] = (auth && pw) ? QString::fromUtf8(pw) : QString();
 		o["engineEnabled"] = enabled;
+		o["token"] = QString::fromUtf8(mkWebServer->token());
 		o["crew"] = allowCrew;
 		o["crewPort"] = (int)mkWebServer->port();
 		QJsonArray lan;

@@ -16,6 +16,7 @@
 #pragma once
 
 #include <QByteArray>
+#include <functional>
 #include <QObject>
 #include <QString>
 #include <QTcpServer>
@@ -35,9 +36,13 @@ class MKWebServer : public QObject {
 	quint16 listenPort = 0;
 	QByteArray configJson;
 	bool allowLan = false;
+	QByteArray tokenValue;
+	std::function<QByteArray(const QString &route, const QByteArray &body, int &status)> apiHandler;
 
 	void respond(QTcpSocket *sock, const QByteArray &request);
 	void sendSimple(QTcpSocket *sock, int code, const char *text);
+	void handleApi(QTcpSocket *sock, const QByteArray &method, const QString &route, const QByteArray &headers,
+		       const QByteArray &body);
 
 private slots:
 	void onNewConnection();
@@ -50,6 +55,14 @@ public:
 
 	/* Served at /mk-config.json to same-origin pages only: how the MK pages reach the built-in engine. */
 	void setConfigJson(const QByteArray &json) { configJson = json; }
+
+	/* Native bridge: /mk-api/<route> (GET or POST, JSON). Loopback + same-origin + per-launch token only.
+	 * The handler runs on the UI thread and returns the JSON reply; set status to an HTTP code. */
+	void setApiHandler(std::function<QByteArray(const QString &route, const QByteArray &body, int &status)> fn)
+	{
+		apiHandler = std::move(fn);
+	}
+	QByteArray token() const { return tokenValue; }
 
 	/* Opt-in: let crew on the same network open the desk by this PC's IP address. */
 	void setAllowLan(bool allow) { allowLan = allow; }
