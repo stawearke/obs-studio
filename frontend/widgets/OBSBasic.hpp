@@ -376,6 +376,7 @@ private:
 	void InitMKStudio();
 	void ClearMKStudio();
 	QByteArray HandleMKApi(const QString &route, const QByteArray &body, int &status);
+	void ApplyMKOverlays();
 	void ApplyMKLayout(bool mkMode);
 	void AddMKDockWidget(QDockWidget *dock, Qt::DockWidgetArea area);
 #endif

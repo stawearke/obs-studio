@@ -121,6 +121,38 @@ bool HasDevice(const QJsonArray &list, const QString &id)
 
 } // namespace
 
+namespace {
+
+/* Keyer overlays live on OBS output channels 7-9 (slot 1-3). Channels above 0 are drawn on top of the
+ * program picture and transitions, and are part of what is streamed and recorded: a real downstream
+ * keyer, with nothing copied into the scenes. Channels 1-6 are the global audio devices. */
+constexpr int MK_OVERLAY_SLOTS = 3;
+constexpr int MK_OVERLAY_FIRST_CHANNEL = 7;
+
+QByteArray OverlayKey(int slot)
+{
+	return QString("Overlay%1").arg(slot).toUtf8();
+}
+
+} // namespace
+
+void OBSBasic::ApplyMKOverlays()
+{
+	config_t *cfg = App()->GetUserConfig();
+	if (!cfg)
+		return;
+	for (int slot = 1; slot <= MK_OVERLAY_SLOTS; slot++) {
+		const QByteArray key = OverlayKey(slot);
+		const char *name = config_get_string(cfg, "MKStudio", key.constData());
+		if (!name || !*name)
+			continue;
+		OBSSourceAutoRelease src = obs_get_source_by_name(name);
+		if (!src)
+			continue;
+		obs_set_output_source(MK_OVERLAY_FIRST_CHANNEL + slot - 1, src);
+	}
+}
+
 /* Native bridge for the MK pages. Audio first: OBS "global" audio channels 1-2 (desktop) and 3-6 (mic/aux).
  * These are always live, unlike inputs inside a scene, and are what OBS Settings > Audio edits. */
 QByteArray OBSBasic::HandleMKApi(const QString &route, const QByteArray &body, int &status)
@@ -145,6 +177,44 @@ QByteArray OBSBasic::HandleMKApi(const QString &route, const QByteArray &body, i
 			channels.append(c);
 		}
 		out["channels"] = channels;
+
+	} else if (route == "overlays") {
+		QJsonArray arr;
+		config_t *cfg = App()->GetUserConfig();
+		for (int slot = 1; slot <= MK_OVERLAY_SLOTS; slot++) {
+			const QByteArray key = OverlayKey(slot);
+			const char *name = cfg ? config_get_string(cfg, "MKStudio", key.constData()) : nullptr;
+			arr.append(QString::fromUtf8(name ? name : ""));
+		}
+		out["slots"] = arr;
+
+	} else if (route == "overlay") {
+		const QJsonObject in = QJsonDocument::fromJson(body).object();
+		const int slot = in["slot"].toInt();
+		const QString scene = in["scene"].toString();
+		config_t *cfg = App()->GetUserConfig();
+
+		if (slot < 1 || slot > MK_OVERLAY_SLOTS || !cfg) {
+			status = 400;
+			out["error"] = "bad slot";
+		} else if (scene.isEmpty()) {
+			obs_set_output_source(MK_OVERLAY_FIRST_CHANNEL + slot - 1, nullptr);
+			config_set_string(cfg, "MKStudio", OverlayKey(slot).constData(), "");
+			config_save_safe(cfg, "tmp", nullptr);
+			out["ok"] = true;
+		} else {
+			const QByteArray sceneUtf8 = scene.toUtf8();
+			OBSSourceAutoRelease src = obs_get_source_by_name(sceneUtf8.constData());
+			if (!src || !obs_scene_from_source(src)) {
+				status = 400;
+				out["error"] = "scene not found";
+			} else {
+				obs_set_output_source(MK_OVERLAY_FIRST_CHANNEL + slot - 1, src);
+				config_set_string(cfg, "MKStudio", OverlayKey(slot).constData(), sceneUtf8.constData());
+				config_save_safe(cfg, "tmp", nullptr);
+				out["ok"] = true;
+			}
+		}
 
 	} else if (route == "monitor-devices") {
 		/* Where Main / Solo pre-listen is heard (OBS Settings > Audio > Monitoring Device). */

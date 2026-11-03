@@ -2054,6 +2054,12 @@ void OBSBasic::OnEvent(enum obs_frontend_event event)
 	if (api) {
 		api->on_event(event);
 	}
+
+#ifdef BROWSER_AVAILABLE
+	/* MK VISION Studio: put the keyer overlays back after the scene collection (re)loads. */
+	if (event == OBS_FRONTEND_EVENT_FINISHED_LOADING || event == OBS_FRONTEND_EVENT_SCENE_COLLECTION_CHANGED)
+		ApplyMKOverlays();
+#endif
 }
 
 OBSPromptResult OBSBasic::PromptForName(const OBSPromptRequest &request, const OBSPromptCallback &callback)
