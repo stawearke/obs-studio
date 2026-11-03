@@ -29,7 +29,11 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QMenu>
+#include <QKeySequence>
+#include <QMetaObject>
 #include <QNetworkInterface>
+#include <QPointer>
+#include <QStatusBar>
 #include <QTimer>
 
 #include <memory>
@@ -62,6 +66,7 @@ const MKTool MK_TOOLS[] = {
 	{"sounds", "MK Sounds", "/sounds", 900, 600},
 	{"audio", "MK VOXONE Audio", "/audio", 1280, 760},
 	{"settings", "MK Settings", "/settings", 900, 700},
+	{"system", "MK System", "/system", 900, 700},
 };
 
 } // namespace
@@ -153,12 +158,99 @@ void OBSBasic::ApplyMKOverlays()
 	}
 }
 
+namespace {
+
+/* OBS menu items as the MK System page shows them. A path like "2.5.1" = top menu 2, item 5, sub-item 1. */
+QString MenuText(QString text)
+{
+	text.replace("&&", "\x01");
+	text.remove('&');
+	text.replace('\x01', '&');
+	return text.trimmed();
+}
+
+QJsonArray MenuItems(QMenu *menu, const QString &path, int depth)
+{
+	QJsonArray arr;
+	if (!menu || depth > 3)
+		return arr;
+
+	/* Some menus (Edit, Tools) refresh their items just before they are shown. */
+	QMetaObject::invokeMethod(menu, "aboutToShow", Qt::DirectConnection);
+
+	const QList<QAction *> actions = menu->actions();
+	bool lastWasSeparator = true;
+	for (int i = 0; i < actions.size(); i++) {
+		QAction *a = actions[i];
+		if (a->isSeparator()) {
+			if (!lastWasSeparator) {
+				QJsonObject sep;
+				sep["separator"] = true;
+				arr.append(sep);
+				lastWasSeparator = true;
+			}
+			continue;
+		}
+		const QString text = MenuText(a->text());
+		if (!a->isVisible() || text.isEmpty())
+			continue;
+
+		QJsonObject o;
+		o["path"] = path + "." + QString::number(i);
+		o["text"] = text;
+		o["enabled"] = a->isEnabled();
+		if (a->isCheckable())
+			o["checked"] = a->isChecked();
+		const QString shortcut = a->shortcut().toString(QKeySequence::NativeText);
+		if (!shortcut.isEmpty())
+			o["shortcut"] = shortcut;
+		if (a->menu())
+			o["children"] = MenuItems(a->menu(), o["path"].toString(), depth + 1);
+		arr.append(o);
+		lastWasSeparator = false;
+	}
+	if (!arr.isEmpty() && arr.last().toObject().contains("separator"))
+		arr.removeLast();
+	return arr;
+}
+
+QAction *ActionAtPath(const QList<QMenu *> &tops, const QString &path)
+{
+	const QStringList parts = path.split('.');
+	if (parts.size() < 2)
+		return nullptr;
+	bool ok = false;
+	const int top = parts[0].toInt(&ok);
+	if (!ok || top < 0 || top >= tops.size())
+		return nullptr;
+
+	QMenu *menu = tops[top];
+	QAction *action = nullptr;
+	for (int p = 1; p < parts.size(); p++) {
+		const int index = parts[p].toInt(&ok);
+		if (!ok || !menu)
+			return nullptr;
+		const QList<QAction *> actions = menu->actions();
+		if (index < 0 || index >= actions.size())
+			return nullptr;
+		action = actions[index];
+		menu = action->menu();
+	}
+	return action;
+}
+
+} // namespace
+
 /* Native bridge for the MK pages. Audio first: OBS "global" audio channels 1-2 (desktop) and 3-6 (mic/aux).
  * These are always live, unlike inputs inside a scene, and are what OBS Settings > Audio edits. */
 QByteArray OBSBasic::HandleMKApi(const QString &route, const QByteArray &body, int &status)
 {
 	status = 200;
 	QJsonObject out;
+
+	/* OBS's own menus, offered to the MK System page (View / Docks are replaced by MK itself). */
+	const QList<QMenu *> tops{ui->menu_File,    ui->menuBasic_MainMenu_Edit, ui->profileMenu,
+				  ui->sceneCollectionMenu, ui->menuTools,             ui->menuBasic_MainMenu_Help};
 
 	if (route == "audio-devices") {
 		out["inputs"] = ListAudioDevices(App()->InputAudioSource());
@@ -272,6 +364,39 @@ QByteArray OBSBasic::HandleMKApi(const QString &route, const QByteArray &body, i
 			blog(LOG_INFO, "[MK VISION Studio] Audio channel %d set to device '%s'", ch, idUtf8.constData());
 			out["ok"] = true;
 		}
+
+	} else if (route == "menus") {
+		QJsonArray menus;
+		for (int t = 0; t < tops.size(); t++) {
+			QJsonObject m;
+			m["title"] = MenuText(tops[t]->title());
+			m["items"] = MenuItems(tops[t], QString::number(t), 0);
+			menus.append(m);
+		}
+		out["menus"] = menus;
+		out["classic"] = !property("mkMode").toBool();
+
+	} else if (route == "menu-trigger") {
+		const QJsonObject in = QJsonDocument::fromJson(body).object();
+		QAction *a = ActionAtPath(tops, in["path"].toString());
+		if (!a || a->menu() || a->isSeparator() || !a->isEnabled()) {
+			status = 400;
+			out["error"] = "that item is not available";
+		} else {
+			/* Run it after this request ends: many items open a window and wait for it. */
+			QPointer<QAction> safe(a);
+			QTimer::singleShot(0, this, [safe]() {
+				if (safe)
+					safe->trigger();
+			});
+			out["ok"] = true;
+		}
+
+	} else if (route == "layout") {
+		const QJsonObject in = QJsonDocument::fromJson(body).object();
+		const bool mkMode = in["mode"].toString() != "classic";
+		QTimer::singleShot(0, this, [this, mkMode]() { ApplyMKLayout(mkMode); });
+		out["ok"] = true;
 
 	} else {
 		status = 404;
@@ -452,6 +577,10 @@ void OBSBasic::ApplyMKLayout(bool mkMode)
 		if (statsDock)
 			statsDock->hide();
 		centralWidget()->hide();
+		/* No OBS screens at all: its menus are on the MK System page, its status is MK's own status bar. */
+		ui->menubar->hide();
+		if (QStatusBar *sb = statusBar())
+			sb->hide();
 
 		/* Re-dock every MK page into one tab group on the right, Switcher in front. */
 		QDockWidget *first = mkStudioDocks.first().get();
@@ -468,6 +597,9 @@ void OBSBasic::ApplyMKLayout(bool mkMode)
 		for (auto &d : mkStudioDocks)
 			d->hide();
 		centralWidget()->show();
+		ui->menubar->show();
+		if (QStatusBar *sb = statusBar())
+			sb->show();
 		for (QDockWidget *d : natives)
 			d->show();
 	}
