@@ -17,6 +17,7 @@
 
 #ifdef BROWSER_AVAILABLE
 #include <docks/BrowserDock.hpp>
+#include <utility/MKMultistream.hpp>
 #include <utility/MKWebServer.hpp>
 #include <utility/platform.hpp>
 
@@ -67,6 +68,7 @@ const MKTool MK_TOOLS[] = {
 	{"audio", "MK VOXONE Audio", "/audio", 1280, 760},
 	{"settings", "MK Settings", "/settings", 900, 700},
 	{"system", "MK System", "/system", 900, 700},
+	{"multistream", "MK Multistream", "/multistream", 1000, 700},
 };
 
 } // namespace
@@ -392,6 +394,31 @@ QByteArray OBSBasic::HandleMKApi(const QString &route, const QByteArray &body, i
 			out["ok"] = true;
 		}
 
+	} else if (route == "multistream" || route == "multistream-save" || route == "multistream-start" ||
+		   route == "multistream-stop") {
+		if (!mkMultistream) {
+			status = 503;
+			out["error"] = "multistream is not available";
+		} else {
+			const QJsonObject in = QJsonDocument::fromJson(body).object();
+			QString error;
+			if (route == "multistream-save") {
+				if (mkMultistream->save(in["targets"].toArray(), error)) {
+					config_t *cfg = App()->GetUserConfig();
+					config_set_string(cfg, "MKStudio", "Multistream",
+							  mkMultistream->serialize().toUtf8().constData());
+					config_save_safe(cfg, "tmp", nullptr);
+				}
+			} else if (route == "multistream-start") {
+				mkMultistream->start(in["id"].toString(), error);
+			} else if (route == "multistream-stop") {
+				mkMultistream->stop(in["id"].toString());
+			}
+			out = mkMultistream->list();
+			if (!error.isEmpty())
+				out["error"] = error;
+		}
+
 	} else if (route == "layout") {
 		const QJsonObject in = QJsonDocument::fromJson(body).object();
 		const bool mkMode = in["mode"].toString() != "classic";
@@ -440,6 +467,12 @@ void OBSBasic::InitMKStudio()
 	mkWebServer->setApiHandler(
 		[this](const QString &route, const QByteArray &body, int &status) { return HandleMKApi(route, body, status); });
 	blog(LOG_INFO, "[MK VISION Studio] Serving %s on http://127.0.0.1:%d", QT_TO_UTF8(root), (int)MK_STUDIO_PORT);
+
+	/* Extra stream destinations (they share the main stream's encoders). */
+	mkMultistream = new MKMultistream;
+	const char *savedTargets = config_get_string(App()->GetUserConfig(), "MKStudio", "Multistream");
+	mkMultistream->load(QString::fromUtf8(savedTargets ? savedTargets : ""));
+	mkMultistream->attach();
 
 	static int panel_version = -1;
 	if (panel_version == -1)
@@ -607,6 +640,10 @@ void OBSBasic::ApplyMKLayout(bool mkMode)
 
 void OBSBasic::ClearMKStudio()
 {
+	/* Stop the extra outputs before OBS shuts its own outputs down. */
+	delete mkMultistream;
+	mkMultistream = nullptr;
+
 	mkStudioDocks.clear();
 	if (mkWebServer) {
 		delete mkWebServer;

@@ -49,6 +49,8 @@ extern volatile bool recording_paused;
 
 class ColorSelect;
 class MKWebServer;
+class MKMultistream;
+class MKMultistream;
 class OBSAbout;
 class OBSBasicAdvAudio;
 class OBSBasicFilters;
@@ -372,6 +374,8 @@ private:
 	/* MK VISION Studio built-in panels */
 	QList<std::shared_ptr<QDockWidget>> mkStudioDocks;
 	MKWebServer *mkWebServer = nullptr;
+	MKMultistream *mkMultistream = nullptr;
+	MKMultistream *mkMultistream = nullptr;
 
 	void InitMKStudio();
 	void ClearMKStudio();

@@ -12,6 +12,10 @@ if(TARGET OBS::browser-panels)
       docks/BrowserDock.hpp
       utility/MKWebServer.cpp
       utility/MKWebServer.hpp
+      utility/MKMultistream.cpp
+      utility/MKMultistream.hpp
+      utility/MKMultistream.cpp
+      utility/MKMultistream.hpp
       widgets/OBSBasic_MKStudio.cpp
       utility/ExtraBrowsersDelegate.cpp
       utility/ExtraBrowsersDelegate.hpp
