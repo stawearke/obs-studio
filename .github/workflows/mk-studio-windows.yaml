@@ -111,3 +111,4 @@ jobs:
         with:
           name: MK-VISION-Studio-${{ env.MK_VERSION }}-portable
           path: MK-VISION-Studio-*-portable-x64.zip
+# rebuild 1795039740
